@@ -26,6 +26,8 @@ from mlagents.trainers.agent_processor import AgentManagerQueue
 from mlagents.trainers.trajectory import Trajectory
 from mlagents.trainers.settings import TestingConfiguration
 from mlagents.trainers.stats import StatsPropertyType
+from mlagents.trainers.saver.torch_saver import TorchSaver
+from mlagents.trainers.saver.tf_saver import TFSaver
 
 RewardSignalResults = Dict[str, RewardSignalResult]
 
@@ -55,6 +57,7 @@ class RLTrainer(Trainer):  # pylint: disable=abstract-method
             self.trainer_settings.max_steps = TestingConfiguration.max_steps
         self._next_save_step = 0
         self._next_summary_step = 0
+        self.saver = None
 
     def end_episode(self) -> None:
         """
@@ -100,8 +103,12 @@ class RLTrainer(Trainer):  # pylint: disable=abstract-method
         self, parsed_behavior_id: BehaviorIdentifiers, behavior_spec: BehaviorSpec
     ) -> Policy:
         if self.framework == "torch":
+            if self.saver is None:
+                self.create_torch_saver(parsed_behavior_id, behavior_spec)
             return self.create_torch_policy(parsed_behavior_id, behavior_spec)
         else:
+            if self.saver is None:
+                self.create_tf_saver(parsed_behavior_id, behavior_spec)
             return self.create_tf_policy(parsed_behavior_id, behavior_spec)
 
     @abc.abstractmethod
@@ -122,6 +129,32 @@ class RLTrainer(Trainer):  # pylint: disable=abstract-method
         """
         pass
 
+    def create_torch_saver(
+        self, parsed_behavior_id: BehaviorIdentifiers, behavior_spec: BehaviorSpec
+    ) -> TorchSaver:
+        """
+        Create a Saver object that uses the PyTorch backend.
+        """
+        self.saver = TorchSaver(
+            behavior_spec,
+            self.trainer_settings,
+            model_path=self.artifact_path,
+            load=self.load,
+        )
+
+    def create_tf_saver(
+        self, parsed_behavior_id: BehaviorIdentifiers, behavior_spec: BehaviorSpec
+    ) -> TFSaver:
+        """
+        Create a Saver object that uses the TensorFlow backend.
+        """
+        self.saver = TFSaver(
+            behavior_spec,
+            self.trainer_settings,
+            model_path=self.artifact_path,
+            load=self.load,
+        )
+
     def _policy_mean_reward(self) -> Optional[float]:
         """ Returns the mean episode reward for the current policy. """
         rewards = self.cumulative_returns_since_policy_update
@@ -140,11 +173,12 @@ class RLTrainer(Trainer):  # pylint: disable=abstract-method
             logger.warning(
                 "Trainer has multiple policies, but default behavior only saves the first."
             )
-        policy = list(self.policies.values())[0]
-        model_path = policy.model_path
-        settings = SerializationSettings(model_path, self.brain_name)
-        checkpoint_path = os.path.join(model_path, f"{self.brain_name}-{self.step}")
-        policy.checkpoint(checkpoint_path, settings)
+        # policy = list(self.policies.values())[0]
+        # model_path = policy.model_path
+        settings = SerializationSettings(self.saver.model_path, self.brain_name)
+        checkpoint_path = os.path.join(self.saver.model_path, f"{self.brain_name}-{self.step}")
+        # policy.checkpoint(checkpoint_path, settings)
+        self.saver.save_checkpoint(checkpoint_path, settings)
         new_checkpoint = NNCheckpoint(
             int(self.step),
             f"{checkpoint_path}.nn",
@@ -165,13 +199,14 @@ class RLTrainer(Trainer):  # pylint: disable=abstract-method
             logger.warning(
                 "Trainer has multiple policies, but default behavior only saves the first."
             )
-        policy = list(self.policies.values())[0]
-        settings = SerializationSettings(policy.model_path, self.brain_name)
+        # policy = list(self.policies.values())[0]
+        settings = SerializationSettings(self.saver.model_path, self.brain_name)
         model_checkpoint = self._checkpoint()
         final_checkpoint = attr.evolve(
-            model_checkpoint, file_path=f"{policy.model_path}.nn"
+            model_checkpoint, file_path=f"{self.saver.model_path}.nn"
         )
-        policy.save(policy.model_path, settings)
+        # policy.save(policy.model_path, settings)
+        self.saver.export(self.saver.model_path, settings)
         NNCheckpointManager.track_final_checkpoint(self.brain_name, final_checkpoint)
 
     @abc.abstractmethod

@@ -263,6 +263,12 @@ class PPOTrainer(RLTrainer):
             )  # type: ignore
         for _reward_signal in self.optimizer.reward_signals.keys():
             self.collected_rewards[_reward_signal] = defaultdict(lambda: 0)
+
+        if self.saver.unregistered:
+            self.saver.register(self.policy.get_modules())
+            self.saver.register(self.optimizer.get_modules())
+            self.saver.maybe_load()
+
         # Needed to resume loads properly
         self.step = policy.get_current_step()
 

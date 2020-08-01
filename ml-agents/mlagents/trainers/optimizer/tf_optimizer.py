@@ -163,3 +163,6 @@ class TFOptimizer(Optimizer):  # pylint: disable=W0223
             np.zeros((m_size), dtype=np.float32)
             for i in range(0, length, self.policy.sequence_length)
         ]
+
+    def get_modules(self):
+        return None
